@@ -89,9 +89,10 @@ public class KafkaMetricsClient {
     }
 
     /**
-     * Sets the Kafka message key used to preserve order within a run and node.
+     * Sets the default Kafka message key used for node-level points
+     * (test start, test end and virtual user metrics).
      *
-     * @param key the message key
+     * @param key the default message key
      */
     public void setMessageKey(String key) {
         if (key != null && !key.isEmpty()) {
@@ -100,11 +101,21 @@ public class KafkaMetricsClient {
     }
 
     /**
-     * Serializes a point to line protocol and sends it to Kafka asynchronously.
+     * Serializes a point to line protocol and sends it to Kafka with the default key.
      *
      * @param point the point to publish
      */
     public void send(Point point) {
+        this.send(point, this.messageKey);
+    }
+
+    /**
+     * Serializes a point to line protocol and sends it to Kafka with an explicit key.
+     *
+     * @param point the point to publish
+     * @param key   the message key that determines the target partition
+     */
+    public void send(Point point, String key) {
         if (this.closed) {
             return;
         }
@@ -120,7 +131,8 @@ public class KafkaMetricsClient {
         }
 
         String lineProtocol = point.toLineProtocol();
-        this.producer.send(new ProducerRecord<>(this.config.getTopic(), this.messageKey, lineProtocol), (metadata, exception) -> {
+        String effectiveKey = (key == null || key.isEmpty()) ? this.messageKey : key;
+        this.producer.send(new ProducerRecord<>(this.config.getTopic(), effectiveKey, lineProtocol), (metadata, exception) -> {
             if (exception == null) {
                 this.consecutiveErrors.set(0);
                 return;

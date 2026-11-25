@@ -196,6 +196,39 @@ A minimal Telegraf consumer configuration:
 
 Notes: when test has been interrupted from UI; the processes may not be finished properly, restart JMeter.
 
+## Distributed testing
+
+The plugin does not aggregate metrics on the controller. Each JMeter slave runs its own
+backend listener and its own asynchronous Kafka producer, and publishes the samples it
+generates directly to the same topic. Adding slaves therefore does not add load to the
+controller.
+
+Every point carries `testName`, `runId` and `nodeName` as tags. Configure them as follows:
+
+* `runId` - use the **same value on every slave** of a run, so results can be combined
+  and compared with later runs.
+* `nodeName` - use a **different value on every slave**, for example `node-01`, `node-02`.
+  The default `Test-Node` is identical on all machines and makes the sources
+  indistinguishable. `nodeName` is a static listener parameter, so the most reliable
+  approach is one JMX file per slave. If you inject it with `-JnodeName`, first verify
+  that your JMeter version resolves the parameter.
+* `testName` - keep it identical across slaves.
+
+Sample points use `runId:nodeName:samplerName` as the Kafka message key. Samples of the
+same sampler from one node stay ordered, while different samplers spread across
+partitions. Node-level points (test start/end, virtual users) keep `runId:nodeName`.
+Make sure the topic has enough partitions - ideally at least the number of slaves times
+the number of samplers - otherwise throughput is limited no matter how large the cluster is.
+
+Further considerations:
+
+* Virtual user metrics are read from the local JVM only. Sum them by `runId` or group by
+  `nodeName` in queries to obtain global concurrency.
+* Enable NTP on all slaves. Timestamps are taken from each node's local clock, so clock
+  skew distorts the timeline.
+* Enable the backend listener on slaves only. If the controller loads the same test plan,
+  samples echoed back from slaves may be published a second time. Verify that each
+  `nodeName` has the expected number of points before trusting the results.
 
 ## Grafana dashboard capabilities
 See deployment instructions here https://grafana.com/grafana/dashboards/13644

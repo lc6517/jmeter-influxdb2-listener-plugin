@@ -153,7 +153,8 @@ public class InfluxDatabaseBackendListenerClient extends AbstractBackendListener
                 var sampleResultPointProvider = new SampleResultPointProvider(sampleResultContext);
 
                 Point resultPoint = sampleResultPointProvider.getPoint();
-                KafkaMetricsClient.getInstance(this.kafkaConfig, LOGGER).send(resultPoint);
+                String samplerKey = this.runId + ":" + this.nodeName + ":" + sampleResult.getSampleLabel();
+                KafkaMetricsClient.getInstance(this.kafkaConfig, LOGGER).send(resultPoint, samplerKey);
             }
         }
     }
@@ -265,6 +266,7 @@ public class InfluxDatabaseBackendListenerClient extends AbstractBackendListener
         this.kafkaConfig = new KafkaConfig(context);
 
         KafkaMetricsClient client = KafkaMetricsClient.getInstance(this.kafkaConfig, LOGGER);
+        // Sample points override this key with runId:nodeName:samplerName; the rest use runId:nodeName.
         client.setMessageKey(this.runId + ":" + this.nodeName);
     }
 
