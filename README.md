@@ -102,7 +102,7 @@ While the first pull request please add your self to the [build.gradle](https://
         }
 
 ## Deployment
-* Put '`jmeter-plugin-influxdb2-listener-<version>.jar`' file from [Releases](https://github.com/mderevyankoaqa/jmeter-influxdb2-listener-plugin/releases) to `~<JmeterPath<\lib\ext`;
+* Put '`jmeter-plugins-kafka-influxdb2-listener-<version>.jar`' file from [Releases](https://github.com/mderevyankoaqa/jmeter-influxdb2-listener-plugin/releases) to `~<JmeterPath<\lib\ext`;
 
 Note: "fatJar" gradle task should be used to create the package for the JMeter.
 
@@ -123,7 +123,7 @@ Note: "fatJar" gradle task should be used to create the package for the JMeter.
 ## Upgrade
 * Close JMeter if its started.
 * Remove old jar.
-* Put '`jmeter-plugin-influxdb2-listener-<version>.jar`' file from [Releases](https://github.com/mderevyankoaqa/jmeter-influxdb2-listener-plugin/releases) to `~<JmeterPath<\lib\ext`;
+* Put '`jmeter-plugins-kafka-influxdb2-listener-<version>.jar`' file from [Releases](https://github.com/mderevyankoaqa/jmeter-influxdb2-listener-plugin/releases) to `~<JmeterPath<\lib\ext`;
 * Run JMeter again and got Listener.
 * Select from the dropdown item with the name '`io.github.mderevyankoaqa.influxdb2.visualizer.JMeterInfluxDBBackendListenerClient`'.
 

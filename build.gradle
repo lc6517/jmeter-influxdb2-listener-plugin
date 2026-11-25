@@ -26,8 +26,13 @@ sourceCompatibility = 11
 group = 'io.github.mderevyankoaqa'
 version = '2.8'
 
-def title = 'JMeterInfluxDB2Listener'
-def archiveName = 'jmeter-plugins-influxdb2-listener'
+def title = 'JMeterKafkaInfluxDB2Listener'
+def archiveName = 'jmeter-plugins-kafka-influxdb2-listener'
+def mavenArtifactId = 'jmeter-plugins-influxdb2-listener'
+
+base {
+    archivesName.set(archiveName)
+}
 
 
 // There's a bug in JMeter leaving extra metadata right now. This is a workaround.
@@ -97,7 +102,7 @@ publishing {
     publications {
         mavenJava(MavenPublication) {
             groupId = 'io.github.mderevyankoaqa'
-            artifactId = archiveName
+            artifactId = mavenArtifactId
             version = version
 
             from components.java
