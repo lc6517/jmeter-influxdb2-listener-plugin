@@ -60,7 +60,8 @@ public class InfluxDatabaseBackendListenerClient extends AbstractBackendListener
     private static final String KEY_SAMPLERS_LIST = "samplersList";
     private static final String KEY_RECORD_SUB_SAMPLES = "recordSubSamples";
 
-    private final WritePrecision writePrecision = WritePrecision.MS;
+    // Telegraf's influx line-protocol parser assumes nanosecond timestamps by default.
+    private final WritePrecision writePrecision = WritePrecision.NS;
 
     /**
      * Constants.
@@ -193,7 +194,7 @@ public class InfluxDatabaseBackendListenerClient extends AbstractBackendListener
 
         this.setupKafkaClient(context);
 
-        Point setupPoint = Point.measurement(TestStartEndMeasurement.MEASUREMENT_NAME).time(System.currentTimeMillis(), writePrecision)
+        Point setupPoint = Point.measurement(TestStartEndMeasurement.MEASUREMENT_NAME).time(System.currentTimeMillis() * ONE_MS_IN_NANOSECONDS, writePrecision)
                 .addTag(TestStartEndMeasurement.Tags.TYPE, TestStartEndMeasurement.Values.STARTED)
                 .addTag(TestStartEndMeasurement.Tags.NODE_NAME, this.nodeName)
                 .addTag(TestStartEndMeasurement.Tags.RUN_ID, this.runId)
@@ -221,7 +222,7 @@ public class InfluxDatabaseBackendListenerClient extends AbstractBackendListener
 
         this.addVirtualUsersMetrics(0, 0, 0, 0, JMeterContextService.getThreadCounts().finishedThreads);
 
-        Point teardownPoint = Point.measurement(TestStartEndMeasurement.MEASUREMENT_NAME).time(System.currentTimeMillis(), writePrecision)
+        Point teardownPoint = Point.measurement(TestStartEndMeasurement.MEASUREMENT_NAME).time(System.currentTimeMillis() * ONE_MS_IN_NANOSECONDS, writePrecision)
                 .addTag(TestStartEndMeasurement.Tags.TYPE, TestStartEndMeasurement.Values.FINISHED)
                 .addTag(TestStartEndMeasurement.Tags.NODE_NAME, this.nodeName)
                 .addTag(TestStartEndMeasurement.Tags.RUN_ID, this.runId)
@@ -296,7 +297,7 @@ public class InfluxDatabaseBackendListenerClient extends AbstractBackendListener
      * Writes thread metrics.
      */
     private void addVirtualUsersMetrics(int minActiveThreads, int meanActiveThreads, int maxActiveThreads, int startedThreads, int finishedThreads) {
-        Point virtualUsersMetricsPoint = Point.measurement(VirtualUsersMeasurement.MEASUREMENT_NAME).time(System.currentTimeMillis(), writePrecision)
+        Point virtualUsersMetricsPoint = Point.measurement(VirtualUsersMeasurement.MEASUREMENT_NAME).time(System.currentTimeMillis() * ONE_MS_IN_NANOSECONDS, writePrecision)
                 .addField(VirtualUsersMeasurement.Fields.MIN_ACTIVE_THREADS, minActiveThreads)
                 .addField(VirtualUsersMeasurement.Fields.MAX_ACTIVE_THREADS, maxActiveThreads)
                 .addField(VirtualUsersMeasurement.Fields.MEAN_ACTIVE_THREADS, meanActiveThreads)
