@@ -47,6 +47,7 @@ def archiveName = 'jmeter-plugins-influxdb2-listener'
         implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_components', version: '5.6.3'
         implementation group: 'org.apache.jmeter', name: 'jorphan', version: '5.6.3'
         implementation group: 'com.influxdb', name: 'influxdb-client-java', version: '6.12.0'
+        implementation group: 'org.apache.kafka', name: 'kafka-clients', version: '3.9.1'
         implementation group: 'org.apache.commons', name: 'commons-lang3', version: '3.14.0'
         implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_http', version: '5.6.3'
         components {
@@ -88,6 +89,9 @@ shadowJar {
     archiveClassifier.set(null)
 
 }
+
+// 让 build/assemble 时自动产出可部署到 JMeter lib/ext 的插件 fat jar
+assemble.dependsOn shadowJar
 
 publishing {
     publications {

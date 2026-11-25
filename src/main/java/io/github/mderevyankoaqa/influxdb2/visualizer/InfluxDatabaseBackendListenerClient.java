@@ -2,10 +2,10 @@ package io.github.mderevyankoaqa.influxdb2.visualizer;
 
 import com.influxdb.client.domain.WritePrecision;
 import com.influxdb.client.write.Point;
-import io.github.mderevyankoaqa.influxdb2.visualizer.config.InfluxDBConfig;
+import io.github.mderevyankoaqa.influxdb2.visualizer.config.KafkaConfig;
 import io.github.mderevyankoaqa.influxdb2.visualizer.config.TestStartEndMeasurement;
 import io.github.mderevyankoaqa.influxdb2.visualizer.config.VirtualUsersMeasurement;
-import io.github.mderevyankoaqa.influxdb2.visualizer.influxdb.client.InfluxDatabaseClient;
+import io.github.mderevyankoaqa.influxdb2.visualizer.kafka.client.KafkaMetricsClient;
 import io.github.mderevyankoaqa.influxdb2.visualizer.result.SampleResultPointContext;
 import io.github.mderevyankoaqa.influxdb2.visualizer.result.SampleResultPointProvider;
 import org.apache.jmeter.config.Arguments;
@@ -19,7 +19,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.security.SecureRandom;
-import java.time.LocalDate;
 import java.util.*;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledFuture;
@@ -28,7 +27,7 @@ import java.util.concurrent.TimeUnit;
 
 
 /**
- * Backend listener that writes JMeter metrics to influxDB directly.
+ * Backend listener that publishes JMeter metrics to Kafka as InfluxDB line protocol.
  *
  * @author Alexander Wert
  * @author Michael Derevyanko (minor changes and improvements)
@@ -111,11 +110,9 @@ public class InfluxDatabaseBackendListenerClient extends AbstractBackendListener
     private boolean recordSubSamples;
 
     /**
-     * The Influx DB Config.
+     * The Kafka writer configuration.
      */
-    private InfluxDBConfig influxDBConfig;
-
-    private Timer timer;
+    private KafkaConfig kafkaConfig;
 
     private ScheduledFuture<?> scheduledFuture;
 
@@ -152,11 +149,11 @@ public class InfluxDatabaseBackendListenerClient extends AbstractBackendListener
                 sampleResultContext.setSamplerType(samplerType);
                 sampleResultContext.setTimeToSet(System.currentTimeMillis() * ONE_MS_IN_NANOSECONDS + this.getUniqueNumberForTheSamplerThread());
                 sampleResultContext.setErrorBodyToBeSaved(context.getBooleanParameter(KEY_INCLUDE_BODY_OF_FAILURES, false));
-                sampleResultContext.setResponseBodyLength(this.influxDBConfig.getResponseBodyLength());
+                sampleResultContext.setResponseBodyLength(this.kafkaConfig.getResponseBodyLength());
                 var sampleResultPointProvider = new SampleResultPointProvider(sampleResultContext);
 
                 Point resultPoint = sampleResultPointProvider.getPoint();
-                InfluxDatabaseClient.getInstance(this.influxDBConfig, LOGGER).collectData(resultPoint);
+                KafkaMetricsClient.getInstance(this.kafkaConfig, LOGGER).send(resultPoint);
             }
         }
     }
@@ -167,18 +164,21 @@ public class InfluxDatabaseBackendListenerClient extends AbstractBackendListener
         arguments.addArgument(KEY_TEST_NAME, "Test");
         arguments.addArgument(KEY_NODE_NAME, "Test-Node");
         arguments.addArgument(KEY_RUN_ID, "R001");
-        arguments.addArgument(InfluxDBConfig.KEY_INFLUX_DB_URL, InfluxDBConfig.DEFAULT_INFLUXDB_URL);
-        arguments.addArgument(InfluxDBConfig.KEY_INFLUX_DB_TOKEN, InfluxDBConfig.DEFAULT_INFLUX_DB_TOKEN);
-        arguments.addArgument(InfluxDBConfig.KEY_INFLUX_DB_ORG, InfluxDBConfig.DEFAULT_INFLUX_DB_ORG);
-        arguments.addArgument(InfluxDBConfig.KEY_INFLUX_DB_BUCKET, InfluxDBConfig.DEFAULT_BUCKET);
-        arguments.addArgument(InfluxDBConfig.KEY_INFLUX_DB_FLUSH_INTERVAL, Integer.toString(InfluxDBConfig.DEFAULT_INFLUX_DB_FLUSH_INTERVAL));
-        arguments.addArgument(InfluxDBConfig.KEY_INFLUX_DB_MAX_BATCH_SIZE, Integer.toString(InfluxDBConfig.DEFAULT_INFLUX_DB_MAX_BATCH_SIZE));
-        arguments.addArgument(InfluxDBConfig.KEY_INFLUX_DB_THRESHOLD_ERROR, Integer.toString(InfluxDBConfig.DEFAULT_THRESHOLD_ERROR));
+        arguments.addArgument(KafkaConfig.KEY_BOOTSTRAP_SERVERS, KafkaConfig.DEFAULT_BOOTSTRAP_SERVERS);
+        arguments.addArgument(KafkaConfig.KEY_TOPIC, KafkaConfig.DEFAULT_TOPIC);
+        arguments.addArgument(KafkaConfig.KEY_ACKS, KafkaConfig.DEFAULT_ACKS);
+        arguments.addArgument(KafkaConfig.KEY_COMPRESSION_TYPE, KafkaConfig.DEFAULT_COMPRESSION_TYPE);
+        arguments.addArgument(KafkaConfig.KEY_LINGER_MS, Integer.toString(KafkaConfig.DEFAULT_LINGER_MS));
+        arguments.addArgument(KafkaConfig.KEY_BATCH_SIZE, Integer.toString(KafkaConfig.DEFAULT_BATCH_SIZE));
+        arguments.addArgument(KafkaConfig.KEY_MAX_BLOCK_MS, Integer.toString(KafkaConfig.DEFAULT_MAX_BLOCK_MS));
+        arguments.addArgument(KafkaConfig.KEY_RETRIES, Integer.toString(KafkaConfig.DEFAULT_RETRIES));
+        arguments.addArgument(KafkaConfig.KEY_DELIVERY_TIMEOUT_MS, Integer.toString(KafkaConfig.DEFAULT_DELIVERY_TIMEOUT_MS));
+        arguments.addArgument(KafkaConfig.KEY_THRESHOLD_ERROR, Integer.toString(KafkaConfig.DEFAULT_THRESHOLD_ERROR));
         arguments.addArgument(KEY_SAMPLERS_LIST, ".*");
         arguments.addArgument(KEY_USE_REGEX_FOR_SAMPLER_LIST, "true");
         arguments.addArgument(KEY_RECORD_SUB_SAMPLES, "true");
         arguments.addArgument(KEY_INCLUDE_BODY_OF_FAILURES, "true");
-        arguments.addArgument(InfluxDBConfig.KEY_RESPONSE_BODY_LENGTH, Integer.toString(InfluxDBConfig.DEFAULT_RESPONSE_BODY_LENGTH));
+        arguments.addArgument(KafkaConfig.KEY_RESPONSE_BODY_LENGTH, Integer.toString(KafkaConfig.DEFAULT_RESPONSE_BODY_LENGTH));
 
         return arguments;
     }
@@ -190,7 +190,7 @@ public class InfluxDatabaseBackendListenerClient extends AbstractBackendListener
         this.randomNumberGenerator = new SecureRandom ();
         this.nodeName = context.getParameter(KEY_NODE_NAME, "Test-Node");
 
-        this.setupInfluxClient(context);
+        this.setupKafkaClient(context);
 
         Point setupPoint = Point.measurement(TestStartEndMeasurement.MEASUREMENT_NAME).time(System.currentTimeMillis(), writePrecision)
                 .addTag(TestStartEndMeasurement.Tags.TYPE, TestStartEndMeasurement.Values.STARTED)
@@ -199,7 +199,7 @@ public class InfluxDatabaseBackendListenerClient extends AbstractBackendListener
                 .addTag(TestStartEndMeasurement.Tags.TEST_NAME, this.testName)
                 .addField(TestStartEndMeasurement.Fields.PLACEHOLDER, "1");
 
-        InfluxDatabaseClient.getInstance(influxDBConfig, LOGGER).collectData(setupPoint);
+        KafkaMetricsClient.getInstance(this.kafkaConfig, LOGGER).send(setupPoint);
 
         this.parseSamplers(context);
         this.scheduler = (ScheduledThreadPoolExecutor) Executors.newScheduledThreadPool(2);
@@ -213,10 +213,7 @@ public class InfluxDatabaseBackendListenerClient extends AbstractBackendListener
 
     @Override
     public void teardownTest(BackendListenerContext context) throws Exception {
-        LOGGER.info("Shutting down influxDB scheduler...");
-
-        // Stop importing data by timer.
-        this.timer.cancel();
+        LOGGER.info("Shutting down Kafka metrics publisher...");
 
         this.scheduledFuture.cancel(false);
         this.scheduler.shutdown();
@@ -230,10 +227,10 @@ public class InfluxDatabaseBackendListenerClient extends AbstractBackendListener
                 .addTag(TestStartEndMeasurement.Tags.TEST_NAME, this.testName)
                 .addField(TestStartEndMeasurement.Fields.PLACEHOLDER, "1");
 
-        InfluxDatabaseClient.getInstance(this.influxDBConfig, LOGGER).collectData(teardownPoint);
+        KafkaMetricsClient.getInstance(this.kafkaConfig, LOGGER).send(teardownPoint);
 
         try {
-            LOGGER.info("influxDB scheduler terminated!");
+            LOGGER.info("Kafka metrics scheduler terminated!");
             if(!this.scheduler.awaitTermination(30, TimeUnit.SECONDS)) {
                 LOGGER.info("Threads didn't finish in 30 seconds!");
             }
@@ -241,7 +238,7 @@ public class InfluxDatabaseBackendListenerClient extends AbstractBackendListener
             LOGGER.error("Error waiting for end of scheduler " + e);
         }
 
-        InfluxDatabaseClient.getInstance(influxDBConfig, LOGGER).close();
+        KafkaMetricsClient.getInstance(this.kafkaConfig, LOGGER).close();
         this.samplersToFilter.clear();
         super.teardownTest(context);
     }
@@ -260,19 +257,15 @@ public class InfluxDatabaseBackendListenerClient extends AbstractBackendListener
     }
 
     /**
-     * Setups influxDB client.
+     * Setups the Kafka writer.
      *
      * @param context {@link BackendListenerContext}.
      */
-    private void setupInfluxClient(BackendListenerContext context) {
+    private void setupKafkaClient(BackendListenerContext context) {
+        this.kafkaConfig = new KafkaConfig(context);
 
-        this.influxDBConfig = new InfluxDBConfig(context);
-
-
-        InfluxDatabaseClient.getInstance(this.influxDBConfig, LOGGER).setupInfluxClient();
-
-        this.importDataByTimer(this.influxDBConfig, LOGGER);
-
+        KafkaMetricsClient client = KafkaMetricsClient.getInstance(this.kafkaConfig, LOGGER);
+        client.setMessageKey(this.runId + ":" + this.nodeName);
     }
 
     /**
@@ -311,7 +304,7 @@ public class InfluxDatabaseBackendListenerClient extends AbstractBackendListener
                 .addTag(VirtualUsersMeasurement.Tags.TEST_NAME, this.testName)
                 .addTag(VirtualUsersMeasurement.Tags.RUN_ID, this.runId);
 
-        InfluxDatabaseClient.getInstance(this.influxDBConfig, LOGGER).collectData(virtualUsersMetricsPoint);
+        KafkaMetricsClient.getInstance(this.kafkaConfig, LOGGER).send(virtualUsersMetricsPoint);
     }
 
     /**
@@ -322,21 +315,4 @@ public class InfluxDatabaseBackendListenerClient extends AbstractBackendListener
         return randomNumberGenerator.nextInt(ONE_MS_IN_NANOSECONDS);
     }
 
-    /**
-     * Imports data by timer set in the settings.
-     * @param conf uses {@link InfluxDBConfig}
-     * @param logger uses {@link Logger}
-     */
-    public void importDataByTimer(InfluxDBConfig conf, Logger logger) {
-        this.timer = new Timer();
-        this.timer.schedule(new TimerTask() {
-            @Override
-            public void run() {
-
-                LOGGER.debug("Running the timer: " + LocalDate.now());
-                InfluxDatabaseClient.getInstance(conf, logger).importData();
-
-            }
-        }, 0, conf.getInfluxdbFlushInterval());
-    }
 }

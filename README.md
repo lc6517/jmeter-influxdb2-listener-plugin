@@ -52,18 +52,19 @@ Notes: if you need to save the errors you got wile the test to csv like file and
 This plugin can be used while the functional testing and load tests as well.
 
 ## Important notes
-🚨 The plugin allows 5 errors happened one by one, then plugin will stop importing the results after that! See details in the logs.
-Counter will be refreshed at least you have 4 fails. This is protection to avoid OOM error.
-The option can be configured in the settings (the key name is `influxDBThresholdError` see the [Plugin configuration](https://github.com/mderevyankoaqa/jmeter-influxdb2-listener-plugin/tree/main#plugin-configuration) for the details). You need to be careful with that option and know the hardware resources to store data in the memory.
+🚨 The plugin allows 5 consecutive Kafka send failures, then it drops further metrics until the test ends. See details in the logs.
+The counter is refreshed after a successful send. This protects JMeter from being blocked by an unavailable broker.
+The option can be configured with `kafkaThresholdError` (see [Plugin configuration](https://github.com/mderevyankoaqa/jmeter-influxdb2-listener-plugin/tree/main#plugin-configuration) for details).
 
-Pleas monitor the elapsed time of the data importing (see logs) to avoid issues with requests sending from JMeter.
-Pay attention on "Sending metrics performance tuning" chapter, see below.
+Please monitor Kafka producer errors and consumer lag during the test.
+Pay attention to the "Sending metrics performance tuning" chapter, see below.
 
 
 ## Compatibility
 The supported versions:
 * 🚨 Java 11 - make sure that you have it (its minimum version); otherwise errors will occur while plugin loading.
-* InfluxDB v2.x, see release notes: https://docs.influxdata.com/influxdb/v2.0/reference/release-notes/influxdb/  (1.8 is not supported)
+* InfluxDB v2.x as the final metrics store, see release notes: https://docs.influxdata.com/influxdb/v2.0/reference/release-notes/influxdb/  (1.8 is not supported)
+* Kafka broker for buffering; Telegraf consumes the topic and writes to InfluxDB.
 * JMeter 5.6.3 only.
 
 * The current board and plugin were tested on Grafana 11.1.3 and InfluxDB 2.7.8, JAVA 21.0.1.
@@ -134,6 +135,8 @@ Note: "fatJar" gradle task should be used to create the package for the JMeter.
 * Set right settings (update all properties).
 
 ## InfluxDB configuration
+The plugin no longer writes to InfluxDB directly. It publishes InfluxDB line protocol to Kafka; run Telegraf with `kafka_consumer` and `influxdb_v2` output to complete the pipeline.
+
 * Create Bucket to store the further testing results.
 
   ![](img/influx1.png)
@@ -146,19 +149,16 @@ Let’s explain the plugin fields:
 * `testName` - the name of the test.
 * `nodeName` - the name of the server.
 * `runId` - the identification number of hte test run, can be dynamic.
-* `influxDBURL` - InfluxDB server URL [protocol://][host][:port], protocol (can be http or https) and the default port is 8086.
-* `influxDBToken` - the influxdb bucket token, the default value should be updated, copy it from InfluxDB site.
-
-  ![](img/influx3.png)
-
-* `influxDBOrganization` - the influxdb bucket organization, the default value should be updated, copy it from InfluxDB site.
-
-  ![](img/influx4.png)
-
-* `influxDBFlushInterval` - its interval to send data to InfluxDB, the default value is 4000 (4 seconds).
-* `influxDBMaxBatchSize` - the max size of the batch with metrics, the default 2000 (2000 items of JMeter results).
-* `influxDBThresholdError` - the error threshold before stopping the import, the default value is 5. (see [Important notes](https://github.com/mderevyankoaqa/jmeter-influxdb2-listener-plugin/tree/main#important-notes) for more detail.)
-* `influxDBBucket` - the InfluxDB bucket name to store the test results.
+* `kafkaBootstrapServers` - Kafka bootstrap servers, the default is `localhost:9092`.
+* `kafkaTopic` - topic that receives line protocol messages, the default is `jmeter-metrics`.
+* `kafkaAcks` - producer acknowledgement level, the default is `all`; the idempotent producer forces `all` anyway.
+* `kafkaCompressionType` - Kafka producer compression, the default is `gzip`.
+* `kafkaLingerMs` - producer batching delay in milliseconds, the default is `20`.
+* `kafkaBatchSize` - producer batch size in bytes, the default is `16384`.
+* `kafkaMaxBlockMs` - maximum blocking time when metadata or buffer is unavailable, the default is `1000`.
+* `kafkaRetries` - producer retries, the default is `3`.
+* `kafkaDeliveryTimeoutMs` - delivery timeout, the default is `30000`.
+* `kafkaThresholdError` - consecutive send failures before metrics are dropped, the default is `5`.
 * `samplersList` - the regex value to sort out the JMeter samplers results; the default is _`.*`_. For example if you have the pattern of JMeter test plan development like this - create the 'Transaction controller', add inside of the 'Transaction controller' the Sampler with request, and the name pattern '`GET->Something`', like on the see screen below.
   The regex `^(Home Page|Login|Search)(-success|-failure)?$` can be used to save only samplers names. The regex can be generated from JMeter menu.
 
@@ -174,13 +174,25 @@ You can modify the generated string in terms of your purposes.
 * `responseBodyLength` - allows saving the response body, not more than the set specified length.
 
 ## Sending metrics performance tuning
-The plugin imports batch with JMeter results each 4 seconds (by default settings). In the logs you will see records like this:
-`INFO o.m.j.i.v.InfluxDatabaseBackendListenerClient: Data has been imported successfully, batch size --> 68, elapsed time is --> 14 ms` (the elapsed time is the response time of the batch importing.)
-So you can control the flush interval depends on the load you have and adjust `influxDBFlushInterval` setting. Is not recommended having less 1 second.  
-Max batch protection -> send data when batch max size is occurred. For example, when batch size is 2000 items (it's the default setting of `influxDBMaxBatchSize`) plugin imports that batch, even when flush interval was not occurred.
-Using both options you can tune data importing and have optimal performance.
+The Kafka producer batches records asynchronously. Tune `kafkaLingerMs` and `kafkaBatchSize` to trade latency for throughput; for high TPS, keeping `gzip` compression and `acks=all` is recommended.
 
-Make sure you have enough ram to aggregate huge batch and optimal flush period.
+The idempotent producer prevents duplicates during retries. If Kafka is unavailable for longer than `kafkaDeliveryTimeoutMs`, sends fail and, after `kafkaThresholdError` consecutive failures, further points are dropped until the test ends. Watch Kafka logs and consumer lag during the test.
+
+A minimal Telegraf consumer configuration:
+
+```toml
+[[inputs.kafka_consumer]]
+  brokers = ["localhost:9092"]
+  topics = ["jmeter-metrics"]
+  consumer_group = "jmeter-influx-writer"
+  data_format = "influx"
+
+[[outputs.influxdb_v2]]
+  urls = ["http://localhost:8086"]
+  token = "YOUR_TOKEN"
+  organization = "YOUR_ORG"
+  bucket = "jmeter"
+```
 
 Notes: when test has been interrupted from UI; the processes may not be finished properly, restart JMeter.
 
